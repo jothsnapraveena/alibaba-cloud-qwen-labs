@@ -1,43 +1,70 @@
-# Recover from transient failures with bounded retries
+# Lab 7: Contract-driven multi-agent evidence review
 
-## What you will build
+**Level:** Advanced  
+**Prerequisites:** Python functions, exceptions, JSON, HTTP and SQL. Complete labs 1 through 6 first.
 
-Inject two timeouts and verify that retries stop after a fixed budget.
+[Previous lab](../06-content-free-observability/README.md) · [Next lab](../08-governed-workflow/README.md)
 
-## Why it works
+## Engineering objective
 
-The retry helper retries timeouts, URL failures, HTTP 429, and selected server errors. It fails immediately for authentication and other non-transient HTTP errors. The exercise records intended delays instead of sleeping.
+Coordinate planner, writer and reviewer roles with explicit schemas, evidence boundaries and a shared model budget.
 
-## Before you start
+This lab is one part of a cumulative platform. Work through the implementation and failure cases before treating the guide as material you can teach independently.
 
-Use Python 3.10 or newer. Run from the repository root. Offline mode needs no account, API key, GPU, or additional packages. For cloud mode, follow the root README configuration instructions. Lab 9 sends five requests; other live labs send one request, except lab 5 which sends at most two.
+## Implemented components
 
-## Run
+- The planner emits a bounded query and top-k rather than executing tools.
+- The host performs tenant-scoped retrieval using the plan.
+- The writer emits an answer and source IDs, which code validates against actual retrieved evidence.
+- A separate reviewer call receives the draft and evidence and returns accept or revise.
+- All three roles share a six-attempt budget, including gateway retries.
+
+## Architecture and tradeoffs
+
+Role separation is implemented as three model calls with distinct instructions and structured contracts. Application code validates exact output keys, types, lengths and allowed citation IDs. The writer cannot add a source simply by naming it. If retrieval finds nothing the workflow abstains before writer and reviewer calls. Accepting a reviewer verdict still leaves the final status at human_review rather than automatically taking a business action.
+
+## Run the implementation
+
+Run from the repository root with Python 3.10 or newer. No third-party packages are needed for the local components. Offline fixtures replace model inference, not the database, protocol process, HTTP server or concurrency controls.
 
 ```bash
 python -m qwenlabs.run 7
+# Optional, real model calls and possible charges
+python -m qwenlabs.run 7 --live
 ```
 
-## Walkthrough
+## Investigate the behavior
 
-Run the fault injection. Inspect attempts=3 and scheduled delays [1,2]. Change the operation to fail permanently and confirm exhaustion. Read the unit test for 401 fast failure.
+Run offline mode to inspect deterministic role fixtures. Run live mode to see genuine planner, writer and reviewer outputs. Change the reviewer to return revise and confirm the workflow stops with revision_required. Return an unknown citation from the writer and ensure execution fails before review. Return invalid JSON and decide which errors warrant a bounded repair call.
 
-## Expected behavior
+## Failure experiments and acceptance criteria
 
-The local synthetic operation reports recovered after three attempts.
+Three successful roles should consume exactly three model attempts. A writer citation outside the retrieved allowlist must fail. An empty source set must abstain. A planner cannot return a Boolean top_k or an unbounded query.
 
-## Limits and troubleshooting
+```bash
+python -m unittest discover -s tests -v
+# Focus on the test class or case named below in tests/test_platform.py:
+# Storage.test_writer_unknown_citation_is_rejected
+```
 
-This helper is educational and is not automatically attached to every client call. Production clients should honor Retry-After, add jitter, and enforce an overall deadline. Retrying inference can incur duplicate charges. Retrying writes can duplicate side effects.
+## Build the next version yourself
 
-## Your contribution exercise
+Add claim-level evidence spans, an independent reviewer model, a revision budget and quality measurements against human labels. Compare the three-role workflow with a single model baseline at equal cost before assuming the extra roles improve outcomes.
 
-Run the example yourself, explain the design in your own words, add one meaningful failure case, and publish what you learned with reproducible commands. Record actual observations, including failures. A fixture run is not proof of Alibaba Cloud usage.
+Document your implementation choices, measurements and failed approaches. Include commands that another developer can reproduce. Add a test that fails before your change and passes afterward.
 
-## Source and implementation
+## Current boundaries
 
-- [Runnable implementation](../../qwenlabs/run.py)
-- [Shared client](../../qwenlabs/client.py)
-- [Core helpers](../../qwenlabs/core.py)
-- [Tests](../../tests/test_labs.py)
-- [Alibaba Cloud Model Studio API documentation](https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope)
+The agents share one model family and evidence, so reviewer errors can correlate with writer errors. Schema validity and allowed citations do not prove the claim is supported. There is no recursive planning, autonomous shell access or unbounded debate. Model JSON output is prompt-based and can fail validation. No automatic JSON-repair loop is included.
+
+## Evidence for a community contribution
+
+Publish a walkthrough using your own reviewed explanation, a live demonstration when relevant, and the failure experiment above. Record model, region, corpus, run date and costs only when observed. Track actual reader questions and improvements in [CONTRIBUTIONS.md](../../CONTRIBUTIONS.md). A local fixture or generated guide is not evidence of hosted-model quality or community impact.
+
+## Code and sources
+
+- [Main implementation](../../qwenlabs/platform.py)
+- [Runnable lab](../../qwenlabs/run.py)
+- [Behavior tests](../../tests/test_platform.py)
+- [Validation record](../../VALIDATION.md)
+- [Official Model Studio API](https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope)
