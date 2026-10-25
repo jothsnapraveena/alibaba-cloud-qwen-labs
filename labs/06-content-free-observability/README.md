@@ -1,46 +1,80 @@
-# Observe Qwen calls without logging prompts
+# Lab 6: MCP runbook server and Qwen tool bridge
 
-## What you will build
+**Level:** Advanced  
+**Prerequisites:** Python functions, exceptions, JSON, HTTP and SQL. Complete labs 1 through 5 first.
 
-Capture request duration and token usage while excluding prompt content.
+[Previous lab](../05-bounded-tool-calling/README.md) · [Next lab](../07-transient-failure-recovery/README.md)
 
-## Why it works
+## Engineering objective
 
-The example measures wall-clock request duration with perf_counter and emits a random trace ID. Live mode includes the provider usage object if available. Offline mode measures local retrieval and labels that distinction explicitly.
+Expose tenant-scoped retrieval over a real stdio subprocess and optionally connect discovered tools to Qwen.
 
-## Before you start
+This lab is one part of a cumulative platform. Work through the implementation and failure cases before treating the guide as material you can teach independently.
 
-Use Python 3.10 or newer. Run from the repository root. Offline mode needs no account, API key, GPU, or additional packages. For cloud mode, follow the root README configuration instructions. Lab 9 sends five requests; other live labs send one request, except lab 5 which sends at most two.
+## Implemented components
 
-## Run
+- A subprocess exchanges newline-delimited JSON-RPC messages on stdin and stdout.
+- The session requires initialize followed by the initialized notification before tool discovery.
+- tools/list advertises a JSON input schema and read-only tool annotation.
+- tools/call validates query size, top-k, tool name and extra arguments on the server.
+- Optional live mode maps discovered schemas into Qwen function tools, executes selected requests through MCP, then returns tool results using the original tool_call_id.
+
+## Architecture and tradeoffs
+
+The host starts a server with a trusted --tenant argument. Tool callers cannot select a different tenant. The server applies that scope before ranking. Discovery metadata describes capabilities but does not grant authorization. The live bridge permits at most three tool calls and at most two logical model requests. Each tool invocation starts a fresh, initialized subprocess session to keep this teaching implementation small and avoid hidden process state.
+
+## Run the implementation
+
+Run from the repository root with Python 3.10 or newer. No third-party packages are needed for the local components. Offline fixtures replace model inference, not the database, protocol process, HTTP server or concurrency controls.
 
 ```bash
 python -m qwenlabs.run 6
-
-# Optional: real cloud calls, may incur charges
+# Optional, real model calls and possible charges
 python -m qwenlabs.run 6 --live
 ```
 
-## Walkthrough
+Start the MCP server directly after seeding a persistent database:
 
-Run offline mode and inspect the JSON. Run live mode and record model, total request duration, and token usage. Simulate a timeout and design an error event that omits credentials and prompt bodies.
+```bash
+mkdir -p results
+python -m qwenlabs.run 2 --db results/mcp.sqlite
+python -m qwenlabs.mcp_stdio --db results/mcp.sqlite --tenant alpha
+```
 
-## Expected behavior
+A host must send valid protocol messages over stdin. Never put informational print statements on stdout. See the pinned [transport](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports) and [tools](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) specifications.
 
-A JSON event contains trace_id, operation, duration_ms, model, usage, and content_logged=false.
+## Investigate the behavior
 
-## Limits and troubleshooting
+Run lab 6 and inspect the three actual protocol responses: initialization, discovery and tool result. Send tools/list before initialization and expect rejection. Add tenant=beta to tool arguments and verify schema validation rejects it. In live mode inspect whether Qwen requested the tool, the MCP result and the final answer. Some models may answer without a tool call.
 
-This is a local event example, not an SLS or OpenTelemetry integration. Duration includes network and provider queue time. It is not isolated GPU inference time or streaming time-to-first-token.
+## Failure experiments and acceptance criteria
 
-## Your contribution exercise
+Malformed JSON should produce a parse error. Unknown methods and tools should produce protocol errors. Invalid tool arguments must not reach retrieval. Notifications must not generate response lines. stdout must contain JSON protocol messages only.
 
-Run the example yourself, explain the design in your own words, add one meaningful failure case, and publish what you learned with reproducible commands. Record actual observations, including failures. A fixture run is not proof of Alibaba Cloud usage.
+```bash
+python -m unittest discover -s tests -v
+# Focus on the test class or case named below in tests/test_platform.py:
+# Storage.test_mcp_process_transport_roundtrip
+```
 
-## Source and implementation
+## Build the next version yourself
 
-- [Runnable implementation](../../qwenlabs/run.py)
-- [Shared client](../../qwenlabs/client.py)
-- [Core helpers](../../qwenlabs/core.py)
-- [Tests](../../tests/test_labs.py)
-- [Alibaba Cloud Model Studio API documentation](https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope)
+Replace the small protocol handler with a pinned maintained MCP SDK, preserve these contract tests, add cancellation and integrate a persistent session lifecycle. Separate tool discovery, authorization and audit policy. Do not treat readOnlyHint from an untrusted server as permission.
+
+Document your implementation choices, measurements and failed approaches. Include commands that another developer can reproduce. Add a test that fails before your change and passes afterward.
+
+## Current boundaries
+
+This is an educational subset pinned to MCP revision 2025-06-18, not the newest protocol or a general-purpose SDK. No HTTP transport, resources, prompts, cancellation, pagination or conformance certification is claimed. The local subprocess trusts its host and OS boundary. For remote multi-user deployment use a maintained SDK and authenticated transport.
+
+## Evidence for a community contribution
+
+Publish a walkthrough using your own reviewed explanation, a live demonstration when relevant, and the failure experiment above. Record model, region, corpus, run date and costs only when observed. Track actual reader questions and improvements in [CONTRIBUTIONS.md](../../CONTRIBUTIONS.md). A local fixture or generated guide is not evidence of hosted-model quality or community impact.
+
+## Code and sources
+
+- [Main implementation](../../qwenlabs/mcp_stdio.py)
+- [Runnable lab](../../qwenlabs/run.py)
+- [Behavior tests](../../tests/test_platform.py)
+- [Validation record](../../VALIDATION.md)
+- [Official Model Studio API](https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope)
