@@ -1,43 +1,68 @@
-# Evaluate retrieval before judging generation
+# Lab 4: Retrieval evaluation and regression gates
 
-## What you will build
+**Level:** Upper intermediate  
+**Prerequisites:** Python functions, exceptions, JSON, HTTP and SQL. Complete labs 1 through 3 first.
 
-Measure hit@1 with a tiny transparent test set.
+[Previous lab](../03-rag-from-chunks/README.md) · [Next lab](../05-bounded-tool-calling/README.md)
 
-## Why it works
+## Engineering objective
 
-Each synthetic query has one expected source ID. Hit@1 is the fraction where that source appears first. These labels assess retrieval only, not answer correctness, faithfulness, or user usefulness.
+Compare a BM25 baseline with a hybrid candidate using labeled evidence, confidence intervals and release checks.
 
-## Before you start
+This lab is one part of a cumulative platform. Work through the implementation and failure cases before treating the guide as material you can teach independently.
 
-Use Python 3.10 or newer. Run from the repository root. Offline mode needs no account, API key, GPU, or additional packages. For cloud mode, follow the root README configuration instructions. Lab 9 sends five requests; other live labs send one request, except lab 5 which sends at most two.
+## Implemented components
 
-## Run
+- Twenty synthetic cases include exact matches, paraphrases, multiple relevant sources, no-answer queries and two tenants.
+- Per-query recall, reciprocal rank and normalized discounted cumulative gain remain inspectable.
+- Source IDs are deduplicated when multiple chunks refer to the same source.
+- A seeded bootstrap resamples query scores to estimate an nDCG interval.
+- A regression gate rejects candidates that degrade recall, MRR or nDCG beyond the configured tolerance.
+
+## Architecture and tradeoffs
+
+Averages hide failures, so every report retains each query and its retrieved sources. For no-answer cases the implementation rewards returning no evidence and penalizes false retrieval. That convention is explicit rather than pretending standard ranking metrics alone measure abstention. The release gate compares point estimates with a 0.02 tolerance. It is not a statistical significance test, and the bootstrap interval on a small synthetic dataset cannot establish production confidence.
+
+## Run the implementation
+
+Run from the repository root with Python 3.10 or newer. No third-party packages are needed for the local components. Offline fixtures replace model inference, not the database, protocol process, HTTP server or concurrency controls.
 
 ```bash
 python -m qwenlabs.run 4
 ```
 
-## Walkthrough
+## Investigate the behavior
 
-Run the local evaluation. Add ten realistic queries with known source labels. Include ambiguous queries and no-answer cases. Compare ranking changes on a held-out set rather than tuning on every example.
+Run the report and inspect the hardest cases instead of focusing only on the aggregate. Change candidate_limit or chunk settings and save both reports. Add a negative query with common stopwords and check false retrieval. Replace some synthetic examples with independently labeled, held-out domain questions. Keep the initial set as a development fixture.
 
-## Expected behavior
+## Failure experiments and acceptance criteria
 
-The initial four synthetic cases report hit@1 of 1.0. This is a teaching result, not evidence of production quality.
+Set candidate recall to zero and verify the regression gate fails. Preserve deterministic bootstrap intervals with a fixed seed. Check that no-answer cases with irrelevant hits receive zero instead of being dropped from the denominator.
 
-## Limits and troubleshooting
+```bash
+python -m unittest discover -s tests -v
+# Focus on the test class or case named below in tests/test_platform.py:
+# Storage.test_regression_gate_detects_degradation
+```
 
-Small and easy datasets inflate confidence. Add separate generation and abstention evaluation before releasing an assistant.
+## Build the next version yourself
 
-## Your contribution exercise
+Add graded relevance, a separate abstention threshold sweep, paired bootstrap differences, answer-grounding labels and cost per successful task. Save baseline reports by corpus, model and index version and require review when labels change.
 
-Run the example yourself, explain the design in your own words, add one meaningful failure case, and publish what you learned with reproducible commands. Record actual observations, including failures. A fixture run is not proof of Alibaba Cloud usage.
+Document your implementation choices, measurements and failed approaches. Include commands that another developer can reproduce. Add a test that fails before your change and passes afterward.
 
-## Source and implementation
+## Current boundaries
 
-- [Runnable implementation](../../qwenlabs/run.py)
-- [Shared client](../../qwenlabs/client.py)
-- [Core helpers](../../qwenlabs/core.py)
-- [Tests](../../tests/test_labs.py)
-- [Alibaba Cloud Model Studio API documentation](https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope)
+This evaluates retrieval, not answer correctness or judge reliability. Binary relevance is assumed. The fixture set is intentionally small and not representative. Metrics do not prove that hybrid retrieval is better than BM25. A paired confidence test and multiple-comparison correction are not implemented.
+
+## Evidence for a community contribution
+
+Publish a walkthrough using your own reviewed explanation, a live demonstration when relevant, and the failure experiment above. Record model, region, corpus, run date and costs only when observed. Track actual reader questions and improvements in [CONTRIBUTIONS.md](../../CONTRIBUTIONS.md). A local fixture or generated guide is not evidence of hosted-model quality or community impact.
+
+## Code and sources
+
+- [Main implementation](../../qwenlabs/platform.py)
+- [Runnable lab](../../qwenlabs/run.py)
+- [Behavior tests](../../tests/test_platform.py)
+- [Validation record](../../VALIDATION.md)
+- [Official Model Studio API](https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope)
